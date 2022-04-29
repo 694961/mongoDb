@@ -1,0 +1,86 @@
+---
+title: "Untitled"
+author: "kjhiuui"
+date: "29/04/2022"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library("mongolite")
+library(leaflet)
+
+url="mongodb://etudiant:ur2@clusterm1-shard-00-00.0rm7t.mongodb.net:27017,clusterm1-shard-00-01.0rm7t.mongodb.net:27017,clusterm1-shard-00-02.0rm7t.mongodb.net:27017/?ssl=true&replicaSet=atlas-l4xi61-shard-0"
+coll = mongo(collection="dump_Jan2022", db="doctolib",
+            url=url,
+            verbose=TRUE)
+coll
+###Premiere requete , concerne tt les centres ###
+qry_all='[
+  {"$geoNear" : {
+      "near": {"type": "Point", "coordinates": [-1.6777926, 48.117266]},
+      "distanceField": "distance",
+      "maxDistance": 500000
+  }},
+{"$unwind":"$visit_motives"},
+{"$unwind":"$visit_motives.slots"},
+{"$match": {"visit_motives.slots":{"$gte":{"$date":"2022-01-26T00:00:00Z"},"$lte":{"$date":"2022-01-29T00:00:00Z"}}}},
+{"$group": {"_id": "$name",
+            "location" : {"$addToSet":"$location.coordinates"},
+            "nb" : {"$sum":1}
+            }}            
+  ]'
+all_centers <- coll$aggregate(pipeline = qry_all)
+df1_coords  <- setNames(as.data.frame(do.call(rbind, all_centers $location)), c("lon", "lat"))
+###bonus:deuxieme requete pour les centres "premiere injection "
+bonus='[
+  {"$geoNear" : {
+    "near": {"type": "Point", "coordinates": [-1.6777926, 48.117266]},
+    "distanceField": "distance",
+    "maxDistance": 50000
+  }},
+  {"$unwind":"$visit_motives"},
+  {"$unwind":"$visit_motives.slots"},
+  {"$match" :{"visit_motives.name": {"$regex": "^1re injection", "$options":"i"},"visit_motives.slots":{"$gte": {"$date":"2022-01-01T00:00:00Z"}, "$lt": {"$date":"2022-06-01T00:00:00Z"}}}},
+  {"$group": {"_id": "$name",
+    "location" : {"$addToSet":"$location.coordinates"},
+    "nb" : {"$sum":1}
+  }}            
+]'
+vaccintion_first_inj=coll$aggregate(pipeline=bonus)
+df2_coords  <- setNames(as.data.frame(do.call(rbind, vaccintion_first_inj$location)), c("lon", "lat"))
+```
+
+```{r}
+pals =colorFactor(c("red","green"),domain = all_centers$nb)
+
+content <- paste(as.character(all_centers$`_id`),", slots available :",
+      as.character(all_centers$`nb`))
+      
+map1 <- leaflet(data=all_centers ) %>% 
+  addTiles() %>% 
+  addCircleMarkers(~df1_coords$lon,
+                  ~df1_coords$lat, 
+                  label= content,
+                  color = ~ pals(nb),
+                  radius = 9
+                    
+        )
+
+map1
+```
+
+```{r}
+map2<-leaflet(data = vaccintion_first_inj) %>% addTiles() %>%
+   addCircleMarkers(~df2_coords$lon, ~ df2_coords$lat,radius = 10,stroke = FALSE, 
+                   fillOpacity = 0.7,
+                   color = "#ff0000",
+                   popup = ~ paste(as.character(`_id`),", slots available :",
+                                   as.character(`nb`),
+
+                                                                    sep=""))
+map2
+```
+
